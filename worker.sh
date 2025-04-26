@@ -1,54 +1,61 @@
-sudo apt-get update && sudo apt-get upgrade -y
-sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+# 시스템 업데이트
+sudo apt update && sudo apt upgrade -y
 
-sudo apt-get update
-sudo apt-get install ca-certificates curl
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
+# 필요한 패키지 설치
+sudo apt install -y apt-transport-https ca-certificates curl
 
-echo \
-"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+# 호스트네임 설정 (선택)
+sudo hostnamectl set-hostname worker-node
+
+# Docker GPG 키 추가
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+# Docker 저장소 추가
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
 sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-sudo apt-get update
-sudo apt-get install docker-ce docker-ce-cli containerd.io
+# Docker 설치
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io
 
-sudo systemctl start docker
+# Docker 활성화 및 부팅시 자동 시작
 sudo systemctl enable docker
+sudo systemctl start docker
 
-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+# Kubernetes GPG 키 추가
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
 
-sudo apt-get update
-sudo apt-get install -y kubelet kubeadm kubectl
+# Kubernetes 저장소 추가
+echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | \
+sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+# 패키지 설치
+sudo apt update
+sudo apt install -y kubelet kubeadm kubectl
+
+# kubelet 잠금 (자동 업데이트 방지)
 sudo apt-mark hold kubelet kubeadm kubectl
 
-# 스왑 비활성화
+# swap 끄기 (필수)
 sudo swapoff -a
-sudo sed -i '/swap/d' /etc/fstab
 
-# iptables 설정
+# /etc/fstab에서 swap 자동 마운트 제거
+sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+
+# Kubernetes 커널 모듈 적용
 cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
-overlay
 br_netfilter
 EOF
 
-sudo modprobe overlay
 sudo modprobe br_netfilter
 
+# 커널 파라미터 세팅
 cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
 net.bridge.bridge-nf-call-iptables  = 1
-net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward                 = 1
+net.bridge.bridge-nf-call-ip6tables = 1
 EOF
 
 sudo sysctl --system
 
-sudo mkdir -p /etc/containerd
-sudo containerd config default | sudo tee /etc/containerd/config.toml
-sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
-sudo systemctl restart containerd
-
-kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/calico.yaml
